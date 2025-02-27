@@ -7,6 +7,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 from typing import List, Optional
 from datetime import datetime
+import asyncio
 import sys
 
 # 常量定义
@@ -114,7 +115,6 @@ def read_proxies() -> List[str]:
 # 创建带有代理的 Web3 实例
 def create_web3_with_proxy(proxy: Optional[str] = None) -> Web3:
     if proxy:
-        # 处理代理格式
         if 'socks' in proxy.lower():
             from web3.contrib.socks import SOCKSProxyManager
             w3 = Web3(SOCKSProxyManager(proxy, RPC_URL))
@@ -125,7 +125,6 @@ def create_web3_with_proxy(proxy: Optional[str] = None) -> Web3:
     else:
         w3 = Web3(Web3.HTTPProvider(RPC_URL))
     
-    # 添加 PoA 中间件（适用于 Base Sepolia 等网络）
     w3.middleware_onion.inject(geth_poa_middleware, layer=0)
     return w3
 
@@ -163,7 +162,7 @@ async def approve_tokens_for_voting(private_key: str, proxy: Optional[str]) -> b
             print("授权交易失败！")
             return False
         
-        print(f"授权交易确认成功！使用Gas: {receipt.gasUsed}")
+        print(f"授权交易确认成功！使用燃气: {receipt.gasUsed}")
         return True
     except Exception as e:
         print(f"授权代币出错: {e}")
@@ -201,7 +200,7 @@ async def vote_on_projects(private_key: str, proxy: Optional[str]) -> bool:
             print("投票交易失败！")
             return False
         
-        print(f"投票交易确认成功！使用Gas: {receipt.gasUsed}")
+        print(f"投票交易确认成功！使用燃气: {receipt.gasUsed}")
         return True
     except Exception as e:
         print(f"投票项目出错: {e}")
@@ -235,7 +234,7 @@ async def claim_tokens(private_key: str, proxy: Optional[str]) -> bool:
             print("领取交易失败！")
             return False
         
-        print(f"领取交易确认成功！使用Gas: {receipt.gasUsed}")
+        print(f"领取交易确认成功！使用燃气: {receipt.gasUsed}")
         return True
     except Exception as e:
         print(f"领取代币出错: {e}")
@@ -277,7 +276,7 @@ async def process_account(private_key: str, proxy: Optional[str], index: int, to
     print(f"使用代理: {proxy or '无代理'}")
 
     if float(balance) < 0.001:
-        print("警告: ETH 余额可能不足以支付Gas费")
+        print("警告: ETH 余额可能不足以支付燃气费")
 
     if should_check_balances:
         await check_token_balances(private_key, proxy)
@@ -350,7 +349,7 @@ async def process_accounts(should_claim: bool, should_vote: bool, should_check_b
         if i < len(private_keys) - 1:
             wait_time = 30
             print(f"等待 {wait_time} 秒后处理下一个账户...")
-            time.sleep(wait_time)
+            await asyncio.sleep(wait_time)  # 使用 asyncio.sleep 替代 time.sleep
 
     print("\n==================================")
     print("总结:")
@@ -367,20 +366,25 @@ async def process_accounts(should_claim: bool, should_vote: bool, should_check_b
     print("所有账户处理完成！")
 
 # 定时任务
-def schedule_daily(should_claim: bool, should_vote: bool, should_check_balances: bool):
-    import asyncio
+async def schedule_daily(should_claim: bool, should_vote: bool, should_check_balances: bool):
     print(f"机器人启动时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"计划任务: {'领取代币' if should_claim else ''} {'和' if should_claim and should_vote else ''} {'投票项目' if should_vote else ''}")
 
-    asyncio.run(process_accounts(should_claim, should_vote, should_check_balances))
+    await process_accounts(should_claim, should_vote, should_check_balances)
 
     while True:
-        time.sleep(24 * 60 * 60)  # 每天执行一次
+        await asyncio.sleep(24 * 60 * 60)  # 每天执行一次
         print(f"执行计划任务时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        asyncio.run(process_accounts(should_claim, should_vote, should_check_balances))
+        await process_accounts(should_claim, should_vote, should_check_balances)
 
 # 主菜单
 async def main_menu():
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
     while True:
         print("\n===== 开源科学自动机器人 | 空投内部人士 =====")
         print("请选择操作:")
@@ -413,7 +417,7 @@ async def main_menu():
                 print("您必须选择至少一个操作来安排计划任务")
                 continue
             print("\n开始执行计划任务...")
-            schedule_daily(should_claim, should_vote, should_check_balances)
+            await schedule_daily(should_claim, should_vote, should_check_balances)
             break
         elif choice == '6':
             print("退出程序。")
@@ -423,5 +427,9 @@ async def main_menu():
 
 # 主程序入口
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main_menu())
+    try:
+        asyncio.run(main_menu())
+    except RuntimeError:
+        # 如果已在事件循环中运行，使用现有循环
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(main_menu())
